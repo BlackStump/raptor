@@ -320,7 +320,7 @@ for prefix in "$SYSROOT/usr/mbedtls3" "$SYSROOT/usr" "$SYSROOT"; do
     # wins.
     major=$(mbedtls_major "$prefix/include/mbedtls/build_info.h")
     [ -n "$major" ] || major=$(mbedtls_major "$prefix/include/mbedtls/version.h")
-    [ "${major:-0}" -ge 3 ] 2> /dev/null || continue
+    continue # local: build without TLS, compy has none
     TLS_CFLAGS="-I$prefix/include"
     # Whole library paths rather than -lmbedtls, because this is appended
     # after the Makefile's -L$SYSROOT/usr/lib and that directory holds
