@@ -48,7 +48,12 @@ HISI_GEN4_PLATFORMS := HI3516EV200 HI3516EV300
 HISI_GEN5_PLATFORMS := HI3516CV610
 HISILICON_PLATFORMS := $(strip $(HISI_GEN4_PLATFORMS) $(HISI_GEN5_PLATFORMS))
 
-VALID_PLATFORMS := $(INGENIC_PLATFORMS) $(SIGMASTAR_PLATFORMS) $(HISILICON_PLATFORMS)
+# Fullhan FH885xV200: ARMv6 (arm1176jzf-s), soft-float, uClibc-built vendor
+# libraries reached through dlopen. Keep in step with raptor-hal/mk/fullhan.mk.
+FULLHAN_PLATFORMS := FH8852V200
+
+VALID_PLATFORMS := $(INGENIC_PLATFORMS) $(SIGMASTAR_PLATFORMS) $(HISILICON_PLATFORMS) \
+                   $(FULLHAN_PLATFORMS)
 
 # Which config/sensors/ subdirectory, if any, this platform's image needs
 # installed. Empty for every generation whose vendor image already ships
@@ -61,11 +66,12 @@ HAL_SENSOR_DIR := $(if $(filter $(PLATFORM),$(HISI_GEN5_PLATFORMS)),hisi_v5)
 VENDOR := $(strip \
   $(if $(filter $(PLATFORM),$(INGENIC_PLATFORMS)),ingenic) \
   $(if $(filter $(PLATFORM),$(SIGMASTAR_PLATFORMS)),sigmastar) \
-  $(if $(filter $(PLATFORM),$(HISILICON_PLATFORMS)),hisilicon))
+  $(if $(filter $(PLATFORM),$(HISILICON_PLATFORMS)),hisilicon) \
+  $(if $(filter $(PLATFORM),$(FULLHAN_PLATFORMS)),fullhan))
 
 ARCH := $(strip \
   $(if $(filter $(PLATFORM),$(INGENIC_PLATFORMS)),mips) \
-  $(if $(filter $(PLATFORM),$(SIGMASTAR_PLATFORMS) $(HISILICON_PLATFORMS)),arm))
+  $(if $(filter $(PLATFORM),$(SIGMASTAR_PLATFORMS) $(HISILICON_PLATFORMS) $(FULLHAN_PLATFORMS)),arm))
 
 ifeq ($(filter clean distclean build,$(MAKECMDGOALS)),)
 ifeq ($(VENDOR),)
@@ -342,6 +348,9 @@ VENDOR_LIBS := $(VENDOR_LIBS_$(VENDOR))
 # ordering. SHIM_LIB carries --export-dynamic only on the static-shim path, and
 # that path depends on a shim archive being in the sysroot.
 LDFLAGS_VENDOR_hisilicon := -Wl,--export-dynamic
+# Fullhan's uClibc-built libraries take `mmap` (by caller-dispatched shim) and
+# `__assert` from the executable; see raptor-hal/src/fhan_v2/hal_common.c.
+LDFLAGS_VENDOR_fullhan := -Wl,--export-dynamic
 
 # System libs for HAL-linked daemons
 # Shim must come BEFORE the vendor SDK libs — symbols must be resolved first.
