@@ -190,13 +190,31 @@ void ric_adc_cleanup(ric_state_t *st)
 	st->adc_initialized = false;
 }
 
+/*
+ * The sysfs directory of an exported pin. Most kernels name it gpio<N>; the
+ * Fullhan FH885xV200 kernel names it GPIO<N> (measured on a PB4, 2026-11-05:
+ * `echo 1 > export` makes /sys/class/gpio/GPIO1). Prefer the lower-case name,
+ * use the upper-case one only when it is the one that exists.
+ */
+static void gpio_path(char *buf, size_t size, int pin, const char *leaf)
+{
+	char alt[64];
+
+	snprintf(buf, size, "/sys/class/gpio/gpio%d/%s", pin, leaf);
+	if (access(buf, F_OK) == 0)
+		return;
+	snprintf(alt, sizeof(alt), "/sys/class/gpio/GPIO%d/%s", pin, leaf);
+	if (access(alt, F_OK) == 0)
+		snprintf(buf, size, "%s", alt);
+}
+
 static void gpio_export(int pin)
 {
 	if (pin < 0)
 		return;
 
 	char path[64];
-	snprintf(path, sizeof(path), "/sys/class/gpio/gpio%d/direction", pin);
+	gpio_path(path, sizeof(path), pin, "direction");
 	if (access(path, F_OK) == 0) {
 		RSS_DEBUG("gpio %d already exported", pin);
 	} else {
@@ -208,6 +226,8 @@ static void gpio_export(int pin)
 				RSS_WARN("gpio %d export: %s", pin, strerror(errno));
 			close(fd);
 		}
+		/* The kernel chose the directory's name at export. */
+		gpio_path(path, sizeof(path), pin, "direction");
 	}
 
 	int fd = open(path, O_WRONLY);
@@ -223,7 +243,7 @@ static void gpio_set(int pin, int value)
 	if (pin < 0)
 		return;
 	char path[64];
-	snprintf(path, sizeof(path), "/sys/class/gpio/gpio%d/value", pin);
+	gpio_path(path, sizeof(path), pin, "value");
 	int fd = open(path, O_WRONLY);
 	if (fd < 0) {
 		/* As loud as a failed write: a pin that cannot open is an

@@ -12,6 +12,25 @@
 
 /* ── GPIO via sysfs ── */
 
+/*
+ * The sysfs directory of an exported pin. Most kernels name it gpio<N>; the
+ * Fullhan FH885xV200 kernel names it GPIO<N> (measured on a PB4, 2026-11-05:
+ * `echo 1 > export` makes /sys/class/gpio/GPIO1). Prefer the lower-case name,
+ * use the upper-case one only when it is the one that exists.
+ */
+static void gpio_path(char *buf, size_t size, int pin, const char *leaf)
+{
+	char alt[64];
+
+	snprintf(buf, size, "/sys/class/gpio/gpio%d/%s", pin, leaf);
+	if (access(buf, F_OK) == 0)
+		return;
+	snprintf(alt, sizeof(alt), "/sys/class/gpio/GPIO%d/%s", pin, leaf);
+	if (access(alt, F_OK) == 0)
+		snprintf(buf, size, "%s", alt);
+}
+
+
 static int gpio_export(int pin)
 {
 	int fd = open("/sys/class/gpio/export", O_WRONLY);
@@ -25,7 +44,7 @@ static int gpio_export(int pin)
 
 	/* Set direction to output */
 	char path[64];
-	snprintf(path, sizeof(path), "/sys/class/gpio/gpio%d/direction", pin);
+	gpio_path(path, sizeof(path), pin, "direction");
 	fd = open(path, O_WRONLY);
 	if (fd < 0)
 		return -1;
@@ -38,7 +57,7 @@ static int gpio_export(int pin)
 static int gpio_set_value(int pin, int value)
 {
 	char path[64];
-	snprintf(path, sizeof(path), "/sys/class/gpio/gpio%d/value", pin);
+	gpio_path(path, sizeof(path), pin, "value");
 	int fd = open(path, O_WRONLY);
 	if (fd < 0)
 		return -1;
