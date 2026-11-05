@@ -58,6 +58,16 @@ static void load_config(ric_state_t *st)
 	c->gpio_ircut2 = rss_config_get_int(cfg, "ircut", "gpio_ircut2", -1);
 	c->gpio_irled = rss_config_get_int(cfg, "ircut", "gpio_irled", -1);
 	c->gpio_irled2 = rss_config_get_int(cfg, "ircut", "gpio_irled2", -1);
+	c->pwm_irled = rss_config_get_int(cfg, "ircut", "pwm_irled", -1);
+	c->pwm_irled_mask = rss_config_get_int(cfg, "ircut", "pwm_irled_mask", 12);
+	c->pwm_irled_duty = rss_config_get_int(cfg, "ircut", "pwm_irled_duty", 8500);
+	c->pwm_irled_period = rss_config_get_int(cfg, "ircut", "pwm_irled_period", 10000);
+	snprintf(c->pwm_irled_path, sizeof(c->pwm_irled_path), "%s",
+		 rss_config_get_str(cfg, "ircut", "pwm_irled_path", "/proc/driver/pwm"));
+	if (c->pwm_irled_period < 1)
+		c->pwm_irled_period = 10000;
+	if (c->pwm_irled_duty < 0 || c->pwm_irled_duty > c->pwm_irled_period)
+		c->pwm_irled_duty = c->pwm_irled_period;
 	/* These pair with manually configured pins; a pin discovered from
 	 * thingino.json carries its own polarity and overwrites them. */
 	c->ircut_active_low = rss_config_get_bool(cfg, "ircut", "gpio_ircut_active_low", false);
@@ -615,7 +625,7 @@ int main(int argc, char **argv)
 	 * found in the field on a wuuk y0510. Decided here, after discovery,
 	 * because that is when the bank topology is finally known; only the
 	 * shipped default is overridden, an explicit ir940 key keeps its say. */
-	if (st.settings.gpio_irled < 0 && st.settings.gpio_irled2 >= 0 &&
+	if (st.settings.gpio_irled < 0 && st.settings.pwm_irled < 0 && st.settings.gpio_irled2 >= 0 &&
 	    !st.settings.ir940_enabled && !st.settings.ir940_explicit) {
 		st.settings.ir940_enabled = true;
 		RSS_INFO("940nm is the only IR bank; enabling it "
@@ -684,12 +694,13 @@ int main(int argc, char **argv)
 
 	static const char *trigger_names[] = {"luma", "gain", "adc", "photo"};
 	RSS_INFO("ric running (mode=%s, trigger=%s, gpio_ircut=%d, gpio_ircut2=%d, gpio_irled=%d, "
-		 "gpio_irled2=%d)",
+		 "gpio_irled2=%d, pwm_irled=%d)",
 		 st.settings.opmode == RIC_AUTO
 			 ? "auto"
 			 : (st.settings.opmode == RIC_FORCE_DAY ? "day" : "night"),
 		 trigger_names[st.settings.trigger], st.settings.gpio_ircut,
-		 st.settings.gpio_ircut2, st.settings.gpio_irled, st.settings.gpio_irled2);
+		 st.settings.gpio_ircut2, st.settings.gpio_irled, st.settings.gpio_irled2,
+		 st.settings.pwm_irled);
 	if (st.settings.trigger == RIC_TRIGGER_ADC) {
 		RSS_DEBUG("  adc: channel=%d night=%d day=%d", st.settings.adc_channel,
 			  st.settings.adc_night, st.settings.adc_day);

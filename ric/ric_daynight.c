@@ -256,6 +256,29 @@ static void gpio_set(int pin, int value)
 	close(fd);
 }
 
+/*
+ * The ir850 bank on a PWM channel (pwm_irled). Fullhan's PWM driver takes
+ * one line per write: channel, mask, duty and period in ns, then four
+ * reserved fields. Off is the same line with duty 0.
+ */
+static int pwm_irled_set(ric_config_t *c, bool on)
+{
+	char line[64];
+	int n = snprintf(line, sizeof(line), "%d,%d,%d,%d,0,0,0,0", c->pwm_irled,
+			 c->pwm_irled_mask, on ? c->pwm_irled_duty : 0, c->pwm_irled_period);
+	int fd = open(c->pwm_irled_path, O_WRONLY);
+
+	if (fd < 0) {
+		RSS_WARN("pwm irled: open %s: %s", c->pwm_irled_path, strerror(errno));
+		return -1;
+	}
+	if (write(fd, line, (size_t)n) != n)
+		RSS_WARN("pwm irled: write '%s' to %s failed: %s", line, c->pwm_irled_path,
+			 strerror(errno));
+	close(fd);
+	return 0;
+}
+
 void ric_gpio_init(ric_state_t *st)
 {
 	gpio_export(st->settings.gpio_ircut);
@@ -272,6 +295,8 @@ void ric_gpio_init(ric_state_t *st)
 		gpio_export(st->settings.gpio_irled2);
 		gpio_set(st->settings.gpio_irled2, st->settings.irled2_active_low ? 1 : 0);
 	}
+	if (st->settings.gpio_irled < 0 && st->settings.pwm_irled >= 0)
+		pwm_irled_set(&st->settings, false);
 }
 
 /*
@@ -350,6 +375,12 @@ int ric_irled_drive(ric_state_t *st, bool bank940, bool on)
 	ric_config_t *c = &st->settings;
 	int pin = bank940 ? c->gpio_irled2 : c->gpio_irled;
 
+	if (!bank940 && pin < 0 && c->pwm_irled >= 0) {
+		pwm_irled_set(c, on);
+		RSS_INFO("ir850: pwm %d duty %d/%d ns (%s)", c->pwm_irled, on ? c->pwm_irled_duty : 0,
+			 c->pwm_irled_period, on ? "on" : "off");
+		return 0;
+	}
 	if (pin < 0)
 		return -1;
 	bool alow = bank940 ? c->irled2_active_low : c->irled_active_low;
@@ -757,7 +788,8 @@ void ric_poll_exposure(ric_state_t *st)
 		 * lifts luma over the threshold, day mode cuts the LEDs,
 		 * the scene goes dark again, and the filter clicks all
 		 * night. */
-		bool ir_banks = (st->settings.gpio_irled >= 0 && st->settings.ir850_enabled) ||
+		bool ir_banks = ((st->settings.gpio_irled >= 0 || st->settings.pwm_irled >= 0) &&
+				 st->settings.ir850_enabled) ||
 				(st->settings.gpio_irled2 >= 0 && st->settings.ir940_enabled);
 		bool ir_lit = ir_banks && st->current_mode == RIC_MODE_NIGHT && !st->probe_active;
 

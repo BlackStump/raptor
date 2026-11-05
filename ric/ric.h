@@ -126,6 +126,17 @@ typedef struct {
 	int gpio_irled;	 /* IR LED enable pin (ir850) */
 	int gpio_irled2; /* second IR LED pin (ir940), -1 = none */
 	/*
+	 * ir850 bank on a PWM channel instead of a GPIO (Fullhan FH885xV200:
+	 * the PB4's lamps are PWM-only). Written to pwm_irled_path as
+	 * "<chn>,<mask>,<duty_ns>,<period_ns>,0,0,0,0"; off is duty 0. Used
+	 * only when gpio_irled is -1.
+	 */
+	int pwm_irled;	      /* channel, -1 = none */
+	int pwm_irled_mask;   /* driver's channel-mask field */
+	int pwm_irled_duty;   /* on-time, ns */
+	int pwm_irled_period; /* period, ns */
+	char pwm_irled_path[64];
+	/*
 	 * Inverted drive, single-pin forms only: a dual-pin ircut
 	 * expresses polarity by pin order (first = day, second = night)
 	 * and never needs these. Inversion happens here in userspace;
