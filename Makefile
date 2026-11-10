@@ -52,8 +52,13 @@ HISILICON_PLATFORMS := $(strip $(HISI_GEN4_PLATFORMS) $(HISI_GEN5_PLATFORMS))
 # libraries reached through dlopen. Keep in step with raptor-hal/mk/fullhan.mk.
 FULLHAN_PLATFORMS := FH8852V200
 
+# Xiongmai XM530 family (XM530, XM550): Cortex-A5, fully soft-float, and an
+# open MPI -- openxiongmai's libopenmpi.a, linked statically, no dlopen. Keep
+# in step with raptor-hal/mk/xiongmai.mk.
+XIONGMAI_PLATFORMS := XM530
+
 VALID_PLATFORMS := $(INGENIC_PLATFORMS) $(SIGMASTAR_PLATFORMS) $(HISILICON_PLATFORMS) \
-                   $(FULLHAN_PLATFORMS)
+                   $(FULLHAN_PLATFORMS) $(XIONGMAI_PLATFORMS)
 
 # Which config/sensors/ subdirectory, if any, this platform's image needs
 # installed. Empty for every generation whose vendor image already ships
@@ -67,11 +72,12 @@ VENDOR := $(strip \
   $(if $(filter $(PLATFORM),$(INGENIC_PLATFORMS)),ingenic) \
   $(if $(filter $(PLATFORM),$(SIGMASTAR_PLATFORMS)),sigmastar) \
   $(if $(filter $(PLATFORM),$(HISILICON_PLATFORMS)),hisilicon) \
-  $(if $(filter $(PLATFORM),$(FULLHAN_PLATFORMS)),fullhan))
+  $(if $(filter $(PLATFORM),$(FULLHAN_PLATFORMS)),fullhan) \
+  $(if $(filter $(PLATFORM),$(XIONGMAI_PLATFORMS)),xiongmai))
 
 ARCH := $(strip \
   $(if $(filter $(PLATFORM),$(INGENIC_PLATFORMS)),mips) \
-  $(if $(filter $(PLATFORM),$(SIGMASTAR_PLATFORMS) $(HISILICON_PLATFORMS) $(FULLHAN_PLATFORMS)),arm))
+  $(if $(filter $(PLATFORM),$(SIGMASTAR_PLATFORMS) $(HISILICON_PLATFORMS) $(FULLHAN_PLATFORMS) $(XIONGMAI_PLATFORMS)),arm))
 
 ifeq ($(filter clean distclean build,$(MAKECMDGOALS)),)
 ifeq ($(VENDOR),)
@@ -333,6 +339,20 @@ endif
 # than failing, and the capture path never calls them — both references take
 # raw PCM and encode in software. libmi_ao is not needed at all; nothing in
 # scope plays audio out.
+# Xiongmai: the MPI is openxiongmai's libopenmpi.a, built from source with the
+# same toolchain (the stock image has no libmpi.so; majestic links it
+# statically). XM_SDK is openxiongmai/libraries -- by default the clone beside
+# the XM550 tree, Cams/openxiongmai for Cams/XM550/raptor/raptor -- and is
+# passed down to raptor-hal for the headers. The archive is built here if it
+# is missing; libmpi's own Makefile hard-sets PATH to a vendor toolchain, so
+# PATH is handed over explicitly.
+ifeq ($(VENDOR),xiongmai)
+XM_SDK ?= $(abspath $(CURDIR)/../../../openxiongmai/libraries)
+export XM_SDK
+XM_MPI_LIB ?= $(XM_SDK)/libmpi/libopenmpi.a
+VENDOR_LIBS_xiongmai := $(XM_MPI_LIB)
+endif
+
 # Keyed off VENDOR rather than written as an if/else, so that a vendor which
 # links nothing needs no entry at all.
 VENDOR_LIBS_ingenic := -limp -lalog
@@ -471,6 +491,13 @@ $(LIB_COMMON_FILE): build-raptor-common
 endif
 
 # -- Daemons --
+
+ifeq ($(VENDOR),xiongmai)
+rvd: $(XM_MPI_LIB)
+$(XM_MPI_LIB):
+	@echo "  BUILD   openxiongmai libmpi"
+	$(Q)$(MAKE) -C $(dir $@) CROSS_COMPILE=$(CROSS_COMPILE) PATH="$$PATH"
+endif
 
 rvd: $(CONFIG_STAMP) $(LIB_HAL_VIDEO_FILE) $(LIB_IPC_FILE) $(LIB_COMMON_FILE) $(RSS_BUILD_OBJ)
 	@echo "  BUILD   rvd"

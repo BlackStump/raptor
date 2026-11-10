@@ -77,12 +77,16 @@ case "$platform_lc" in
     fh8852v200) PLATFORM=FH8852V200 ;;
     fh8856v200|fh8858v200|fh8852v210|fh8856v210|fh8858v210)
         PLATFORM=FH8852V200; SOC_MODEL=$platform_lc ;;
+    # Xiongmai XM530 family. One kernel, toolchain and library set (OpenIPC's
+    # xm530 build) for both packages; the MPI is openxiongmai's, see Makefile.
+    xm530) PLATFORM=XM530 ;;
+    xm550) PLATFORM=XM530; SOC_MODEL=$platform_lc ;;
     *)
         echo "Usage: $0 <platform> <br_output> [target...]"
         echo ""
         echo "Families: t10 t20 t21 t23 t30 t31 t32 t33 t40 t41 a1"
         echo "          infinity6b0 infinity6e infinity6c"
-        echo "          hi3516ev200 hi3516ev300 hi3516cv6xx fh8852v200"
+        echo "          hi3516ev200 hi3516ev300 hi3516cv6xx fh8852v200 xm530"
         echo ""
         echo "Parts. Naming one of these instead of its family fills in the"
         echo "per-part encoder ceilings, which a family build leaves unset:"
@@ -93,6 +97,7 @@ case "$platform_lc" in
         echo "               ssc378de ssc378qe"
         echo "  hi3516cv6xx  hi3516cv608 hi3516cv610"
         echo "  fh8852v200   fh8856v200 fh8858v200 fh8852v210 fh8856v210 fh8858v210"
+        echo "  xm530        xm550"
         echo ""
         echo "  <br_output> is the buildroot output directory containing"
         echo "  host/ with the cross-compiler and sysroot."
@@ -104,7 +109,7 @@ esac
 # and ARM, and the Hi3516 parts are HiSilicon and ARM. That splits both the
 # sysroot tuple and the compiler prefix, so neither can stay hardcoded below.
 case "$PLATFORM" in
-    HI3516EV200|HI3516EV300|HI3516CV610|FH8852V200)
+    HI3516EV200|HI3516EV300|HI3516CV610|FH8852V200|XM530)
         # Soft-float, and note the tuples: musleabi, NOT musleabihf. These are
         # the ARM parts here that are not hard-float, so they get their own
         # arm rather than a label on Infinity6E's.
