@@ -349,14 +349,17 @@ endif
 # as NEEDED, so they are linked --no-as-needed to stay in the binary's list.
 # libsns.so is what the image's /usr/lib/libsns.so link (to
 # /usr/lib/sensors/libsns_X50_XM530.so, firmware #2663) satisfies.
+# The encoder is libxmvenc.a (MIT, static): the Hantro H1 driven directly.
 ifeq ($(VENDOR),xiongmai)
 XM_SDK ?= $(abspath $(CURDIR)/../../../openxiongmai/libraries)
 export XM_SDK
 XM_SNS ?= X50_XM530
 XM_LIB_DIR ?= $(CURDIR)/build-xiongmai
 XM_LIBS := $(XM_LIB_DIR)/libxmhost.so $(XM_LIB_DIR)/libispapp_XM530.so \
-           $(XM_LIB_DIR)/libisp_XM530.so $(XM_LIB_DIR)/libsns.so
-VENDOR_LIBS_xiongmai := -L$(XM_LIB_DIR) -Wl,--no-as-needed -lxmhost -lispapp_XM530 \
+           $(XM_LIB_DIR)/libisp_XM530.so $(XM_LIB_DIR)/libsns.so \
+           $(XM_LIB_DIR)/libxmvenc.a
+VENDOR_LIBS_xiongmai := $(XM_LIB_DIR)/libxmvenc.a \
+                        -L$(XM_LIB_DIR) -Wl,--no-as-needed -lxmhost -lispapp_XM530 \
                         -lisp_XM530 -lsns -Wl,--as-needed
 endif
 
@@ -501,16 +504,24 @@ endif
 
 ifeq ($(VENDOR),xiongmai)
 # The libraries' own Makefiles: libispapp's defaults to arm-xm-linux-, and
-# libmpi's sets PATH to a vendor toolchain, so both are handed over.
+# libmpi's sets PATH to a vendor toolchain, so both are handed over. They
+# are asked every time (FORCE) -- they rebuild only what changed -- and a
+# staged copy is replaced only when the library changed, so a change in
+# openxiongmai always reaches rvd and an unchanged tree relinks nothing.
+XM_STAGE = $(Q)cmp -s $(1) $@ || cp $(1) $@
 rvd rad: $(XM_LIBS)
-$(XM_LIB_DIR)/lib%.so: | $(XM_LIB_DIR)
+$(XM_LIB_DIR)/lib%.so: FORCE | $(XM_LIB_DIR)
 	@echo "  BUILD   openxiongmai lib$*"
-	$(Q)$(MAKE) -C $(XM_SDK)/lib$* CROSS_COMPILE=$(CROSS_COMPILE) PATH="$$PATH"
-	$(Q)cp $(XM_SDK)/lib$*/lib$*.so $@
-$(XM_LIB_DIR)/libsns.so: | $(XM_LIB_DIR)
+	$(Q)$(MAKE) -s -C $(XM_SDK)/lib$* CROSS_COMPILE=$(CROSS_COMPILE) PATH="$$PATH"
+	$(call XM_STAGE,$(XM_SDK)/lib$*/lib$*.so)
+$(XM_LIB_DIR)/libxmvenc.a: FORCE | $(XM_LIB_DIR)
+	@echo "  BUILD   openxiongmai libxmvenc"
+	$(Q)$(MAKE) -s -C $(XM_SDK)/libxmvenc CROSS_COMPILE=$(CROSS_COMPILE) PATH="$$PATH"
+	$(call XM_STAGE,$(XM_SDK)/libxmvenc/libxmvenc.a)
+$(XM_LIB_DIR)/libsns.so: FORCE | $(XM_LIB_DIR)
 	@echo "  BUILD   openxiongmai libsns_$(XM_SNS)"
-	$(Q)$(MAKE) -C $(XM_SDK)/libsns_$(XM_SNS) CROSS_COMPILE=$(CROSS_COMPILE) PATH="$$PATH"
-	$(Q)cp $(XM_SDK)/libsns_$(XM_SNS)/libsns_$(XM_SNS).so $@
+	$(Q)$(MAKE) -s -C $(XM_SDK)/libsns_$(XM_SNS) CROSS_COMPILE=$(CROSS_COMPILE) PATH="$$PATH"
+	$(call XM_STAGE,$(XM_SDK)/libsns_$(XM_SNS)/libsns_$(XM_SNS).so)
 $(XM_LIB_DIR):
 	$(Q)mkdir -p $@
 endif
