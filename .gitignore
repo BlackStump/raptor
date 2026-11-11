@@ -45,3 +45,4 @@ tests/tools/
 .claude/worktrees/
 .build-config
 board.conf
+build-xiongmai/

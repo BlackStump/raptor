@@ -339,18 +339,25 @@ endif
 # than failing, and the capture path never calls them — both references take
 # raw PCM and encode in software. libmi_ao is not needed at all; nothing in
 # scope plays audio out.
-# Xiongmai: the MPI is openxiongmai's libopenmpi.a, built from source with the
-# same toolchain (the stock image has no libmpi.so; majestic links it
-# statically). XM_SDK is openxiongmai/libraries -- by default the clone beside
-# the XM550 tree, Cams/openxiongmai for Cams/XM550/raptor/raptor -- and is
-# passed down to raptor-hal for the headers. The archive is built here if it
-# is missing; libmpi's own Makefile hard-sets PATH to a vendor toolchain, so
-# PATH is handed over explicitly.
+# Xiongmai: rvd links openxiongmai's libxmhost.so (the open MPI built in, the
+# MIPI receiver, the 3A hooks and camera_* stubs majestic used to give the
+# ISP libraries), libispapp_XM530.so, the open libisp_XM530.so and the
+# sensor library as libsns.so -- the four xmhost_test runs on, all built
+# here from XM_SDK with this toolchain and staged in XM_LIB_DIR. No
+# libopenmpi.a: the MPI keeps its file descriptors in file statics, so there
+# must be exactly one copy, libxmhost's. libispapp names none of the others
+# as NEEDED, so they are linked --no-as-needed to stay in the binary's list.
+# libsns.so is what the image's /usr/lib/libsns.so link (to
+# /usr/lib/sensors/libsns_X50_XM530.so, firmware #2663) satisfies.
 ifeq ($(VENDOR),xiongmai)
 XM_SDK ?= $(abspath $(CURDIR)/../../../openxiongmai/libraries)
 export XM_SDK
-XM_MPI_LIB ?= $(XM_SDK)/libmpi/libopenmpi.a
-VENDOR_LIBS_xiongmai := $(XM_MPI_LIB)
+XM_SNS ?= X50_XM530
+XM_LIB_DIR ?= $(CURDIR)/build-xiongmai
+XM_LIBS := $(XM_LIB_DIR)/libxmhost.so $(XM_LIB_DIR)/libispapp_XM530.so \
+           $(XM_LIB_DIR)/libisp_XM530.so $(XM_LIB_DIR)/libsns.so
+VENDOR_LIBS_xiongmai := -L$(XM_LIB_DIR) -Wl,--no-as-needed -lxmhost -lispapp_XM530 \
+                        -lisp_XM530 -lsns -Wl,--as-needed
 endif
 
 # Keyed off VENDOR rather than written as an if/else, so that a vendor which
@@ -493,10 +500,19 @@ endif
 # -- Daemons --
 
 ifeq ($(VENDOR),xiongmai)
-rvd: $(XM_MPI_LIB)
-$(XM_MPI_LIB):
-	@echo "  BUILD   openxiongmai libmpi"
-	$(Q)$(MAKE) -C $(dir $@) CROSS_COMPILE=$(CROSS_COMPILE) PATH="$$PATH"
+# The libraries' own Makefiles: libispapp's defaults to arm-xm-linux-, and
+# libmpi's sets PATH to a vendor toolchain, so both are handed over.
+rvd rad: $(XM_LIBS)
+$(XM_LIB_DIR)/lib%.so: | $(XM_LIB_DIR)
+	@echo "  BUILD   openxiongmai lib$*"
+	$(Q)$(MAKE) -C $(XM_SDK)/lib$* CROSS_COMPILE=$(CROSS_COMPILE) PATH="$$PATH"
+	$(Q)cp $(XM_SDK)/lib$*/lib$*.so $@
+$(XM_LIB_DIR)/libsns.so: | $(XM_LIB_DIR)
+	@echo "  BUILD   openxiongmai libsns_$(XM_SNS)"
+	$(Q)$(MAKE) -C $(XM_SDK)/libsns_$(XM_SNS) CROSS_COMPILE=$(CROSS_COMPILE) PATH="$$PATH"
+	$(Q)cp $(XM_SDK)/libsns_$(XM_SNS)/libsns_$(XM_SNS).so $@
+$(XM_LIB_DIR):
+	$(Q)mkdir -p $@
 endif
 
 rvd: $(CONFIG_STAMP) $(LIB_HAL_VIDEO_FILE) $(LIB_IPC_FILE) $(LIB_COMMON_FILE) $(RSS_BUILD_OBJ)
@@ -682,7 +698,7 @@ clean:
 		$(MAKE) -C $$d clean 2>/dev/null || true; \
 	done
 	rm -f rss_build_info.c rss_build_info.o rss_tls.o
-	rm -rf build
+	rm -rf build build-xiongmai
 
 distclean: clean
 	$(MAKE) -C $(HAL_DIR) clean
