@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 
 #include <raptor_hal.h>
 
@@ -53,6 +54,77 @@ static int adc_open_channel(int channel)
 	return open(path, O_RDONLY | O_CLOEXEC);
 }
 
+#ifdef PLATFORM_XM530
+/*
+ * XM530/XM550: no ADC driver. The SAR ADC is three registers in the
+ * pin-control block, read through /dev/mem the way the vendor's isp
+ * reads its "hardware photoresistor": 0x480 bits 0-1 enable it, 0x494
+ * bits 0-1 = 2 selects the mode, 0x484 holds the 8-bit sample. The LED
+ * board's sensor line (J4 pin 1) lands on it: lit ~125, dark 255 --
+ * high is dark, so ric is handed 255 - raw to keep its "high = bright"
+ * contract. The vendor switches at raw >207 (night) and <=174 (day),
+ * i.e. adc_night 48, adc_day 81 here. Only channel 0 is known.
+ */
+
+#define XM_ADC_PAGE  0x10020000u
+#define XM_ADC_CTRL  (0x480 / 4)
+#define XM_ADC_DATA  (0x484 / 4)
+#define XM_ADC_MODE  (0x494 / 4)
+
+static volatile uint32_t *xm_adc;
+static uint32_t xm_adc_saved_ctrl, xm_adc_saved_mode;
+
+bool ric_adc_start(ric_state_t *st)
+{
+	if (st->settings.adc_channel != 0)
+		RSS_WARN("ADC: XM530 has channel 0 only; using it");
+
+	int fd = open("/dev/mem", O_RDWR | O_SYNC | O_CLOEXEC);
+	if (fd < 0) {
+		RSS_WARN("ADC: /dev/mem: %s", strerror(errno));
+		return false;
+	}
+	void *m = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, fd, XM_ADC_PAGE);
+	if (m == MAP_FAILED) {
+		RSS_WARN("ADC: map 0x%08x: %s", XM_ADC_PAGE, strerror(errno));
+		close(fd);
+		return false;
+	}
+	xm_adc = m;
+	st->adc_fd = fd;
+
+	xm_adc_saved_ctrl = xm_adc[XM_ADC_CTRL];
+	xm_adc_saved_mode = xm_adc[XM_ADC_MODE];
+	xm_adc[XM_ADC_CTRL] = xm_adc_saved_ctrl | 3;
+	xm_adc[XM_ADC_MODE] = (xm_adc_saved_mode & ~3u) | 2;
+	usleep(20000);
+
+	RSS_INFO("ADC: XM530 SAR ADC on, raw %u", xm_adc[XM_ADC_DATA] & 0xff);
+	return true;
+}
+
+static int adc_read(ric_state_t *st)
+{
+	if (st->adc_fd < 0 || !xm_adc)
+		return -1;
+	return 255 - (int)(xm_adc[XM_ADC_DATA] & 0xff);
+}
+
+void ric_adc_cleanup(ric_state_t *st)
+{
+	if (xm_adc) {
+		xm_adc[XM_ADC_MODE] = xm_adc_saved_mode;
+		xm_adc[XM_ADC_CTRL] = xm_adc_saved_ctrl;
+		munmap((void *)xm_adc, 4096);
+		xm_adc = NULL;
+	}
+	if (st->adc_fd >= 0) {
+		close(st->adc_fd);
+		st->adc_fd = -1;
+	}
+	st->adc_initialized = false;
+}
+#else
 bool ric_adc_start(ric_state_t *st)
 {
 	int channel = st->settings.adc_channel;
@@ -81,6 +153,17 @@ static int adc_read(ric_state_t *st)
 	int value;
 	return (read(st->adc_fd, &value, sizeof(value)) == sizeof(value)) ? value : -1;
 }
+
+void ric_adc_cleanup(ric_state_t *st)
+{
+	if (st->adc_fd >= 0) {
+		ioctl(st->adc_fd, ADC_IOC_DISABLE);
+		close(st->adc_fd);
+		st->adc_fd = -1;
+	}
+	st->adc_initialized = false;
+}
+#endif /* PLATFORM_XM530 */
 
 /*
  * A photoresistor that stops answering is silent by nature: the read
@@ -178,16 +261,6 @@ static void rvd_note_good_query(ric_state_t *st)
 	}
 	st->rvd_fail_run = 0;
 	st->rvd_fail_warned = false;
-}
-
-void ric_adc_cleanup(ric_state_t *st)
-{
-	if (st->adc_fd >= 0) {
-		ioctl(st->adc_fd, ADC_IOC_DISABLE);
-		close(st->adc_fd);
-		st->adc_fd = -1;
-	}
-	st->adc_initialized = false;
 }
 
 /*
