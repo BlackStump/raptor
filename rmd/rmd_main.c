@@ -125,7 +125,11 @@ static void rmd_update_state(rmd_ctx_t *ctx, bool motion)
 			ctx->last_motion_us = now;
 		} else {
 			int64_t elapsed_sec = (now - ctx->cooldown_start_us) / 1000000;
-			int post_sec = ctx->settings.record_post_sec > ctx->settings.cooldown_sec
+			/* record_post_sec only stretches the cooldown when motion
+			 * records; otherwise events would hold 30 s for nothing */
+			int post_sec = ctx->settings.record_on_motion &&
+						       ctx->settings.record_post_sec >
+							       ctx->settings.cooldown_sec
 					       ? ctx->settings.record_post_sec
 					       : ctx->settings.cooldown_sec;
 			if (elapsed_sec >= post_sec) {
