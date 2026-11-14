@@ -491,6 +491,20 @@ void rvd_frame_loop(rvd_state_t *st, volatile sig_atomic_t *running)
 		pthread_attr_destroy(&ivs_attr);
 	}
 
+	/* Software motion thread (no IVS engine) */
+	if (st->swmd) {
+		pthread_attr_t sw_attr;
+		pthread_attr_init(&sw_attr);
+		pthread_attr_setstacksize(&sw_attr, 64 * 1024);
+		atomic_store(&st->swmd_active, true);
+		if (pthread_create(&st->swmd_tid, &sw_attr, rvd_swmd_thread, st) != 0) {
+			RSS_ERROR("motion thread create failed");
+			st->swmd_tid = 0;
+			atomic_store(&st->swmd_active, false);
+		}
+		pthread_attr_destroy(&sw_attr);
+	}
+
 	/* Main thread: handle control socket */
 	int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
 	if (epoll_fd < 0)
@@ -571,6 +585,13 @@ void rvd_frame_loop(rvd_state_t *st, volatile sig_atomic_t *running)
 		} else {
 			usleep(100000);
 		}
+	}
+
+	/* Software motion reads stream1's frames: stop it before the streams */
+	if (st->swmd_tid) {
+		atomic_store(&st->swmd_active, false);
+		pthread_join(st->swmd_tid, NULL);
+		st->swmd_tid = 0;
 	}
 
 	/* Stop all encoder threads + disable FS + stop enc */
