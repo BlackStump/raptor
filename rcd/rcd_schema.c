@@ -200,7 +200,7 @@ static const char *const choices_align[] = {"left", "center", "right", NULL};
 static const char *const choices_position[] = {
 	"top_left",	 "top_center",	 "top_right", "bottom_left",
 	"bottom_center", "bottom_right", "center",    NULL};
-static const char *const choices_algorithm[] = {"move", "base_move", "persondet", "yolo", NULL};
+static const char *const choices_algorithm[] = {"move", "base_move", "persondet", "yolo", "soft", NULL};
 static const char *const choices_recmode[] = {"continuous", "motion", "both", NULL};
 
 /*
