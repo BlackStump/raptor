@@ -41,19 +41,6 @@
 #define ADC_IOC_ENABLE	0
 #define ADC_IOC_DISABLE 1
 
-static int adc_open_channel(int channel)
-{
-	char path[64];
-
-	snprintf(path, sizeof(path), "/dev/ingenic_adc_aux_%d", channel);
-	int fd = open(path, O_RDONLY | O_CLOEXEC);
-	if (fd >= 0)
-		return fd;
-
-	snprintf(path, sizeof(path), "/dev/jz_adc_aux_%d", channel);
-	return open(path, O_RDONLY | O_CLOEXEC);
-}
-
 #ifdef PLATFORM_XM530
 /*
  * XM530/XM550: no ADC driver. The SAR ADC is three registers in the
@@ -125,6 +112,19 @@ void ric_adc_cleanup(ric_state_t *st)
 	st->adc_initialized = false;
 }
 #else
+static int adc_open_channel(int channel)
+{
+	char path[64];
+
+	snprintf(path, sizeof(path), "/dev/ingenic_adc_aux_%d", channel);
+	int fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd >= 0)
+		return fd;
+
+	snprintf(path, sizeof(path), "/dev/jz_adc_aux_%d", channel);
+	return open(path, O_RDONLY | O_CLOEXEC);
+}
+
 bool ric_adc_start(ric_state_t *st)
 {
 	int channel = st->settings.adc_channel;
