@@ -9,11 +9,14 @@
  * `ivs-status`, rmd and everything after it work unchanged.
  *
  * What it is built to ignore, since its results become phone alerts:
- *   - exposure steps and slow light changes: the frame-wide mean shift is
- *     taken out before cells are compared;
- *   - whole-scene changes (IR-cut / day-night switch, a light switched
- *     on, AE settling): when most of the grid changes at once the
- *     background is reset and detection rests for a moment;
+ *   - exposure and light changes: AE gain scales every cell by the same
+ *     factor, so the background is scaled by the median ratio of the
+ *     frame to it before cells are compared (a median, so a person
+ *     filling up to half the picture does not skew it), and a cell must
+ *     differ by a share of its brightness as well as a fixed amount;
+ *   - whole-scene changes (IR-cut / day-night switch): when nearly all of
+ *     the grid still differs, the background is reset and detection
+ *     rests for a moment;
  *   - single-frame flicker and noise: a cell must differ by a sensitivity
  *     threshold, enough cells must differ, and on two checks in a row.
  * Motion holds for 2 s after the last positive check, as the IVS move
@@ -37,11 +40,13 @@
 #define SWMD_STEP 4		   /* sample every 4th pixel, both ways */
 #define SWMD_HOLD_US 2000000	   /* motion stays on this long after a hit */
 #define SWMD_SETTLE_US 3000000	   /* rest after a whole-scene change */
-#define SWMD_GLOBAL_PCT 50	   /* more of the grid than this = scene change */
+#define SWMD_GLOBAL_PCT 75	   /* more of the grid than this = scene change */
 #define SWMD_CONFIRM 2		   /* consecutive positive checks to report */
 
-/* by sensitivity 0..4 (IVS's scale): luma difference per cell, cells */
-static const int swmd_thr[5] = {20, 14, 10, 7, 5};
+/* by sensitivity 0..4 (IVS's scale): a cell differs by more than
+ * thr + rel% of its expected luma; motion needs min_cells of them */
+static const int swmd_thr[5] = {16, 12, 9, 7, 5};
+static const int swmd_rel[5] = {30, 22, 16, 12, 9};
 static const int swmd_min_cells[5] = {6, 4, 3, 2, 2};
 
 /* One raw-frame user at a time: this thread and `save raw` share the HAL's
@@ -76,6 +81,19 @@ int rvd_swmd_init(rvd_state_t *st)
 	RSS_INFO("motion: software detection on stream1 (sensitivity %d, every %d ms)", sens,
 		 iv);
 	return RSS_OK;
+}
+
+static int cmp_int(const void *a, const void *b)
+{
+	return *(const int *)a - *(const int *)b;
+}
+
+static int median(const int *v, int n)
+{
+	int tmp[SWMD_CELLS];
+	memcpy(tmp, v, (size_t)n * sizeof(int));
+	qsort(tmp, (size_t)n, sizeof(int), cmp_int);
+	return tmp[n / 2];
 }
 
 /* Mean luma of each grid cell, sampled. NV12/NV21: luma plane first,
@@ -127,7 +145,7 @@ void *rvd_swmd_thread(void *arg)
 	int chn = st->streams[1].fs_chn;
 	int cur[SWMD_CELLS], bg[SWMD_CELLS]; /* bg in 1/16 luma */
 	bool have_bg = false;
-	int hits = 0, fails = 0;
+	int hits = 0, fails = 0, checks = 0;
 	int64_t settle_until = 0, last_hit = 0;
 
 	RSS_INFO("motion: software detection thread started (fs %d)", chn);
@@ -157,20 +175,30 @@ void *rvd_swmd_thread(void *arg)
 			continue;
 		}
 
-		/* frame-wide shift (exposure, slow light) taken out first */
-		int shift = 0;
+		/* exposure / light: scale the background by the frame's median
+		 * ratio to it (x256) before comparing */
+		int bgl[SWMD_CELLS];
 		for (int i = 0; i < SWMD_CELLS; i++)
-			shift += cur[i] - (bg[i] >> 4);
-		shift /= SWMD_CELLS;
+			bgl[i] = bg[i] >> 4;
+		int mc = median(cur, SWMD_CELLS), mb = median(bgl, SWMD_CELLS);
+		int ratio = 256;
+		if (mb >= 4 && mc >= 4)
+			ratio = mc * 256 / mb;
 
 		int sens = atomic_load(&st->swmd_sens);
-		int thr = swmd_thr[sens], changed = 0;
+		int changed = 0;
 		bool cell_changed[SWMD_CELLS];
 		for (int i = 0; i < SWMD_CELLS; i++) {
-			int d = abs(cur[i] - (bg[i] >> 4) - shift);
-			cell_changed[i] = d > thr;
+			int expect = bgl[i] * ratio / 256;
+			int d = abs(cur[i] - expect);
+			cell_changed[i] = d > swmd_thr[sens] + expect * swmd_rel[sens] / 100;
 			changed += cell_changed[i];
 		}
+
+		/* for tuning: what the checks see, every ~5 s at -d */
+		if (++checks % (5000 / atomic_load(&st->swmd_interval_ms) + 1) == 0)
+			RSS_DEBUG("motion: %d/%d cells over, light x%d.%02d, median %d", changed,
+				  SWMD_CELLS, ratio / 256, (ratio % 256) * 100 / 256, mc);
 
 		bool motion_now = false;
 		if (changed * 100 > SWMD_GLOBAL_PCT * SWMD_CELLS) {
@@ -187,7 +215,8 @@ void *rvd_swmd_thread(void *arg)
 			motion_now = changed >= swmd_min_cells[sens];
 
 		/* background: quick where still, slow where something is, so
-		 * a parked car or a moved chair fades in over ~10 s */
+		 * a parked car or a moved chair fades in over ~10 s. It tracks
+		 * the frame's brightness too, so the ratio returns to 1. */
 		for (int i = 0; i < SWMD_CELLS; i++) {
 			int target = cur[i] << 4;
 			bg[i] += (target - bg[i]) >> (cell_changed[i] ? 5 : 3);
