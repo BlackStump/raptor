@@ -31,6 +31,7 @@ typedef struct {
 	bool record_on_motion;
 	int record_post_sec;
 	int gpio_pin;
+	char event_file[128]; /* created on motion, removed when it ends */
 } rmd_config_t;
 
 /* Daemon context */
@@ -55,5 +56,6 @@ typedef struct {
 void rmd_gpio_init(rmd_ctx_t *ctx);
 void rmd_gpio_set(rmd_ctx_t *ctx, bool active);
 int rmd_trigger_recording(rmd_ctx_t *ctx, bool start);
+void rmd_event_file_set(rmd_ctx_t *ctx, bool active);
 
 #endif /* RMD_H */

@@ -27,6 +27,8 @@ static void load_config(rmd_ctx_t *ctx)
 	ctx->settings.record_on_motion = rss_config_get_bool(cfg, "motion", "record", true);
 	ctx->settings.record_post_sec = rss_config_get_int(cfg, "motion", "record_post_sec", 30);
 	ctx->settings.gpio_pin = rss_config_get_int(cfg, "motion", "gpio_pin", -1);
+	rss_strlcpy(ctx->settings.event_file, rss_config_get_str(cfg, "motion", "event_file", ""),
+		    sizeof(ctx->settings.event_file));
 }
 
 /* Send configured IVS parameters to RVD */
@@ -104,6 +106,7 @@ static void rmd_update_state(rmd_ctx_t *ctx, bool motion)
 				ctx->recording_active = true;
 			}
 			rmd_gpio_set(ctx, true);
+			rmd_event_file_set(ctx, true);
 		}
 		break;
 
@@ -133,6 +136,7 @@ static void rmd_update_state(rmd_ctx_t *ctx, bool motion)
 					ctx->recording_active = false;
 				}
 				rmd_gpio_set(ctx, false);
+				rmd_event_file_set(ctx, false);
 			}
 		}
 		break;
@@ -258,6 +262,7 @@ int main(int argc, char **argv)
 
 	/* GPIO init */
 	rmd_gpio_init(&ctx);
+	rmd_event_file_set(&ctx, false); /* no stale "on" from a previous run */
 
 	/* Control socket */
 	rss_mkdir_p(RSS_RUN_DIR);
@@ -296,6 +301,7 @@ int main(int argc, char **argv)
 	}
 
 	RSS_INFO("rmd shutting down");
+	rmd_event_file_set(&ctx, false);
 
 cleanup:
 	if (ctx.recording_active)

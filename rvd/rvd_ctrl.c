@@ -1696,7 +1696,10 @@ static int handle_ivs_cmd(const char *cmd, const char *cmd_json, rvd_state_t *st
 		int persons = st->ivs_persondet ? atomic_load(&st->ivs_person_count) : -1;
 		cJSON *r = cJSON_CreateObject();
 		cJSON_AddStringToObject(r, "status", "ok");
-		cJSON_AddBoolToObject(r, "active", atomic_load(&st->ivs_active));
+		cJSON_AddBoolToObject(r, "active",
+				      atomic_load(&st->ivs_active) || atomic_load(&st->swmd_active));
+		if (st->swmd)
+			cJSON_AddStringToObject(r, "engine", "soft");
 		cJSON_AddBoolToObject(r, "motion", motion);
 		cJSON_AddBoolToObject(r, "persondet", st->ivs_persondet);
 		cJSON_AddNumberToObject(r, "persons", (double)persons);
@@ -1728,6 +1731,27 @@ static int handle_ivs_cmd(const char *cmd, const char *cmd_json, rvd_state_t *st
 			cJSON_AddNumberToObject(item, "class", (double)d->class_id);
 			cJSON_AddItemToArray(arr, item);
 		}
+		return rss_ctrl_resp_json(resp, resp_size, r);
+	}
+
+	if (strcmp(cmd, "ivs-set-sensitivity") == 0 && st->swmd) {
+		int sens = -1;
+		if (rss_json_get_int(cmd_json, "value", &sens) == 0 && sens >= 0 && sens <= 4) {
+			atomic_store(&st->swmd_sens, sens);
+			cJSON *r = cJSON_CreateObject();
+			cJSON_AddStringToObject(r, "status", "ok");
+			cJSON_AddNumberToObject(r, "sensitivity", (double)sens);
+			return rss_ctrl_resp_json(resp, resp_size, r);
+		}
+		return rss_ctrl_resp_error(resp, resp_size, "invalid sensitivity (0-4)");
+	}
+
+	/* skip_frames is IVS's; software detection paces itself by
+	 * [motion] interval_ms. Accepted so rmd's setup does not warn. */
+	if (strcmp(cmd, "ivs-set-skip-frames") == 0 && st->swmd) {
+		cJSON *r = cJSON_CreateObject();
+		cJSON_AddStringToObject(r, "status", "ok");
+		cJSON_AddNumberToObject(r, "interval_ms", (double)atomic_load(&st->swmd_interval_ms));
 		return rss_ctrl_resp_json(resp, resp_size, r);
 	}
 
@@ -2411,13 +2435,19 @@ static int handle_pipeline_cmd(const char *cmd, const char *cmd_json, rvd_state_
 			if (jpeg_ch < 0 || jpeg_ch >= st->stream_count)
 				return rss_ctrl_resp_error(resp, resp_size, "bad video channel");
 			int fs_chn = st->streams[jpeg_ch].fs_chn;
+			/* software motion grabs from the same channel (rvd_swmd.c) */
+			pthread_mutex_lock(&rvd_raw_lock);
 			int ret = RSS_HAL_CALL(st->ops, fs_set_frame_depth, st->hal_ctx, fs_chn, 1);
-			if (ret == RSS_ERR_NOTSUP)
+			if (ret == RSS_ERR_NOTSUP) {
+				pthread_mutex_unlock(&rvd_raw_lock);
 				return rss_ctrl_resp_error(resp, resp_size,
 							   "raw snap not supported on this SoC");
-			if (ret != 0)
+			}
+			if (ret != 0) {
+				pthread_mutex_unlock(&rvd_raw_lock);
 				return rss_ctrl_resp_error(resp, resp_size,
 							   "frame depth alloc failed (rmem?)");
+			}
 
 			rss_frame_info_t info = {0};
 			void *frame = NULL;
@@ -2425,6 +2455,7 @@ static int handle_pipeline_cmd(const char *cmd, const char *cmd_json, rvd_state_
 					   &info);
 			if (ret != 0 || !frame || !info.virt_addr || info.size == 0) {
 				RSS_HAL_CALL(st->ops, fs_set_frame_depth, st->hal_ctx, fs_chn, 0);
+				pthread_mutex_unlock(&rvd_raw_lock);
 				return rss_ctrl_resp_error(resp, resp_size,
 							   "raw frame grab failed");
 			}
@@ -2439,6 +2470,7 @@ static int handle_pipeline_cmd(const char *cmd, const char *cmd_json, rvd_state_
 			}
 			RSS_HAL_CALL(st->ops, fs_release_frame, st->hal_ctx, fs_chn, frame);
 			RSS_HAL_CALL(st->ops, fs_set_frame_depth, st->hal_ctx, fs_chn, 0);
+			pthread_mutex_unlock(&rvd_raw_lock);
 			if (fd < 0 || wr != (ssize_t)info.size || rename(tmp, file) != 0) {
 				unlink(tmp);
 				return rss_ctrl_resp_error(resp, resp_size, strerror(errno));

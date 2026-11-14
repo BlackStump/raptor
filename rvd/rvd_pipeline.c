@@ -1594,6 +1594,16 @@ int rvd_pipeline_init(rvd_state_t *st)
 	/* ── 7-10. Create encoder, OSD, bind, rings per stream ── */
 	/* IVS init must happen before bind (SDK requires all groups created) */
 	st->ivs_enabled = rss_config_get_bool(cfg, "motion", "enabled", false);
+	st->swmd = false;
+	if (st->ivs_enabled &&
+	    (!st->ops->ivs_create_group ||
+	     strcmp(rss_config_get_str(cfg, "motion", "algorithm", "move"), "soft") == 0)) {
+		/* no IVS engine (or asked for software): rvd_swmd.c, which binds
+		 * nothing -- it reads stream1's frames once the streams run */
+		st->ivs_enabled = false;
+		if (rvd_swmd_init(st) != RSS_OK)
+			RSS_WARN("motion detection disabled");
+	}
 	if (st->ivs_enabled) {
 		int ivs_ret = rvd_ivs_init(st);
 		if (ivs_ret != RSS_OK) {

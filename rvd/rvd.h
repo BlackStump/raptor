@@ -186,6 +186,14 @@ struct rvd_state {
 	_Atomic int ivs_person_count;
 	rss_ivs_detect_result_t ivs_detections; /* latest persondet results */
 	pthread_mutex_t ivs_det_lock;		/* protects ivs_detections */
+
+	/* Software motion (rvd_swmd.c): HALs with no IVS engine. Shares
+	 * ivs_motion / ivs_motion_ts with the IVS path. */
+	bool swmd;
+	pthread_t swmd_tid;
+	_Atomic bool swmd_active;
+	_Atomic int swmd_sens;	      /* 0-4, IVS's scale */
+	_Atomic int swmd_interval_ms; /* between checks */
 };
 
 /* rvd_pipeline.c */
@@ -227,5 +235,10 @@ void rvd_ivs_pause(rvd_state_t *st);
 void rvd_ivs_resume(rvd_state_t *st);
 void rvd_ivs_deinit(rvd_state_t *st);
 void *rvd_ivs_thread(void *arg);
+
+/* rvd_swmd.c */
+extern pthread_mutex_t rvd_raw_lock; /* serialises raw fs_get_frame users */
+int rvd_swmd_init(rvd_state_t *st);
+void *rvd_swmd_thread(void *arg);
 
 #endif /* RVD_H */

@@ -7,6 +7,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #include "rmd.h"
 
@@ -83,6 +84,42 @@ void rmd_gpio_set(rmd_ctx_t *ctx, bool active)
 		return;
 	gpio_set_value(ctx->settings.gpio_pin, active ? 1 : 0);
 	RSS_DEBUG("GPIO %d = %d", ctx->settings.gpio_pin, active ? 1 : 0);
+}
+
+/* ── Event file ──
+ *
+ * [motion] event_file: created when motion starts, removed when the
+ * cooldown ends. onvif_notify_server watches its directory (inotify) and
+ * turns create/delete into ONVIF motion events; anything else can watch
+ * it the same way. The directory is made if missing (one level).
+ */
+void rmd_event_file_set(rmd_ctx_t *ctx, bool active)
+{
+	const char *f = ctx->settings.event_file;
+	if (!f[0])
+		return;
+	if (!active) {
+		if (unlink(f) == 0)
+			RSS_DEBUG("event file %s removed", f);
+		return;
+	}
+	int fd = open(f, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+	if (fd < 0 && errno == ENOENT) {
+		char dir[128];
+		rss_strlcpy(dir, f, sizeof(dir));
+		char *slash = strrchr(dir, '/');
+		if (slash && slash != dir) {
+			*slash = '\0';
+			mkdir(dir, 0755);
+			fd = open(f, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+		}
+	}
+	if (fd < 0) {
+		RSS_WARN("event file %s: %s", f, strerror(errno));
+		return;
+	}
+	close(fd);
+	RSS_DEBUG("event file %s created", f);
 }
 
 /* ── Recording trigger via RMR control socket ── */
